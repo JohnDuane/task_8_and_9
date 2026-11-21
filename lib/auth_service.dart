@@ -51,6 +51,28 @@ class AuthService {
     }
   }
 
+  // EMAIL/PASSWORD LOGIN
+  Future<UserCredential> signInWithEmail(
+    String email,
+    String password,
+  ) async {
+    return await _auth.signInWithEmailAndPassword(
+      email: email.trim(),
+      password: password,
+    );
+  }
+
+  // EMAIL/PASSWORD REGISTER
+  Future<UserCredential> registerWithEmail(
+    String email,
+    String password,
+  ) async {
+    return await _auth.createUserWithEmailAndPassword(
+      email: email.trim(),
+      password: password,
+    );
+  }
+
   // GET CURRENT USER
   User? get currentUser => _auth.currentUser;
 

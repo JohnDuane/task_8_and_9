@@ -2,7 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-
+import 'package:dio/dio.dart';
 import 'auth_service.dart';
 import 'login.dart';
 import 'crud.dart';
@@ -26,8 +26,9 @@ class _HomePageState extends State<HomePage> {
   final quantityController = TextEditingController();
 
   final Crud crud = Crud();
-
+  PickedImg? selectedImage;
   bool showFavOnly = false;
+  bool _isUploading = false;
 
   @override
   void dispose() {
@@ -38,104 +39,138 @@ class _HomePageState extends State<HomePage> {
 
   // ADD ITEM
   void addItemDialog() {
-    nameController.clear();
-    quantityController.clear();
+  nameController.clear();
+  quantityController.clear();
+  selectedImage = null;
+  _isUploading = false;
 
-    showDialog(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('Add Item'),
-          content: Form(
-            key: _formKey,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextFormField(
-                  controller: nameController,
-                  decoration: const InputDecoration(
-                    hintText: 'Name',
-                    border: OutlineInputBorder(),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Name is required';
-                    }
-                    return null;
-                  },
-                ),
-
-                const SizedBox(height: 15),
-
-                TextFormField(
-                  controller: quantityController,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    hintText: 'Quantity',
-                    border: OutlineInputBorder(),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Quantity is required';
-                    }
-
-                    if (int.tryParse(value) == null) {
-                      return 'Enter a valid number';
-                    }
-
-                    if (int.parse(value) < 0) {
-                      return 'Quantity cannot be negative';
-                    }
-
-                    return null;
-                  },
-                ),
-              ],
-            ),
-          ),
-
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Cancel'),
-            ),
-
-            ElevatedButton(
-              onPressed: () async {
-                if (!_formKey.currentState!.validate()) return;
-
-                try {
-                  await crud.add(
-                    nameController.text.trim(),
-                    int.parse(quantityController.text),
-                  );
-
-                  if (!mounted) return;
-
-                  Navigator.pop(dialogContext);
-
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Item successfully added!'),
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (dialogContext) {
+      return StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: const Text('Add Item'),
+            content: Form(
+              key: _formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextFormField(
+                    controller: nameController,
+                    decoration: const InputDecoration(
+                      hintText: 'Name',
+                      border: OutlineInputBorder(),
                     ),
-                  );
-                } catch (e) {
-                  if (!mounted) return;
-
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Failed to add item: $e'),
+                    validator: (value) =>
+                        (value == null || value.trim().isEmpty)
+                            ? 'Name is required'
+                            : null,
+                  ),
+                  const SizedBox(height: 15),
+                  TextFormField(
+                    controller: quantityController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      hintText: 'Quantity',
+                      border: OutlineInputBorder(),
                     ),
-                  );
-                }
-              },
-              child: const Text('Save'),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Quantity is required';
+                      }
+                      final n = int.tryParse(value);
+                      if (n == null) return 'Enter a valid number';
+                      if (n < 0) return 'Quantity cannot be negative';
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 15),
+
+                  // IMAGE PREVIEW
+                  if (selectedImage != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Image.file(
+                        selectedImage!.file,
+                        height: 100,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+
+                  ElevatedButton(
+                    onPressed: _isUploading
+                        ? null
+                        : () async {
+                            setDialogState(() => _isUploading = true);
+                            try {
+                              final picked = await crud.pickImgForAddItem();
+                              if (picked != null) {
+                                setDialogState(() => selectedImage = picked);
+                              }
+                            } catch (e) {
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(this.context).showSnackBar(
+                                SnackBar(content: Text('Image upload failed: $e')),
+                              );
+                            } finally {
+                              setDialogState(() => _isUploading = false);
+                            }
+                          },
+                    child: _isUploading
+                        ? const SizedBox(
+                            height: 18,
+                            width: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Text(selectedImage == null
+                            ? 'Add image'
+                            : 'Change image'),
+                  ),
+                ],
+              ),
             ),
-          ],
-        );
-      },
-    );
-  }
+            actions: [
+              TextButton(
+                onPressed:
+                    _isUploading ? null : () => Navigator.pop(dialogContext),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                // disabled while the image is still uploading
+                onPressed: _isUploading
+                    ? null
+                    : () async {
+                        if (!_formKey.currentState!.validate()) return;
+                        try {
+                          await crud.add(
+                            nameController.text.trim(),
+                            int.parse(quantityController.text),
+                            selectedImage?.url,
+                          );
+                          if (!mounted) return;
+                          Navigator.pop(dialogContext);
+                          ScaffoldMessenger.of(this.context).showSnackBar(
+                            const SnackBar(
+                                content: Text('Item successfully added!')),
+                          );
+                        } catch (e) {
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(this.context).showSnackBar(
+                            SnackBar(content: Text('Failed to add item: $e')),
+                          );
+                        }
+                      },
+                child: const Text('Save'),
+              ),
+            ],
+          );
+        },
+      );
+    },
+  );
+}
 
   // EDIT ITEM
   void openEditDialog(DocumentSnapshot item) {
@@ -357,8 +392,10 @@ class _HomePageState extends State<HomePage> {
               final doc = filteredDocuments[index];
               final data = doc.data();
 
-              final isFavorite =
-                  data['is_favorite'] == true;
+              final isFavorite = data['is_favorite'] == true;
+
+              final String? imageUrl = data['image_url'];
+              final Timestamp? date = data['created_at'];
 
               return Card(
                 margin: const EdgeInsets.fromLTRB(
@@ -367,6 +404,23 @@ class _HomePageState extends State<HomePage> {
                 elevation: 3,
 
                 child: ListTile(
+                  leading: imageUrl != null && imageUrl.isNotEmpty
+                    ? Image.network(
+                        imageUrl,
+                        width: 65,
+                        height: 65,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) {
+                          return const Icon(
+                            Icons.broken_image,
+                            size: 50,
+                          );
+                        },
+                      )
+                    : const Icon(
+                        Icons.inventory_2,
+                        size: 50,
+                      ),
                   title: Text(
                     data['name'] ?? 'Unnamed item',
                     style: const TextStyle(
